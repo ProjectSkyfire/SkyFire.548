@@ -47,6 +47,8 @@ enum DruidSpells
     SPELL_DRUID_INCREASED_MOONFIRE_DURATION = 38414,
     SPELL_DRUID_LIFEBLOOM_ENERGIZE          = 64372,
     SPELL_DRUID_LIFEBLOOM_FINAL_HEAL        = 33778,
+    SPELL_DRUID_LIFEBLOOM                   = 33763,
+    SPELL_DRUID_GLYPH_OF_BLOOMING           = 121840,
     SPELL_DRUID_LIVING_SEED_HEAL            = 48503,
     SPELL_DRUID_LIVING_SEED_PROC            = 48504,
     SPELL_DRUID_NATURES_GRACE               = 16880,
@@ -59,6 +61,52 @@ enum DruidSpells
     SPELL_DRUID_TIGER_S_FURY_ENERGIZE       = 51178
 };
 
+// Called by Regrowth - 8936, Nourish - 50464, Healing Touch - 5185
+// Lifebloom - 33763 refresh duration
+class spell_dru_lifebloom_refresh : public SpellScriptLoader
+{
+    public:
+        spell_dru_lifebloom_refresh() : SpellScriptLoader("spell_dru_lifebloom_refresh") { }
+
+        class spell_dru_lifebloom_refresh_SpellScript : public SpellScript
+        {
+            PrepareSpellScript(spell_dru_lifebloom_refresh_SpellScript)
+
+            bool Validate(SpellInfo const* /*spellInfo*/) override
+            {
+                if (!sSpellMgr->GetSpellInfo(SPELL_DRUID_LIFEBLOOM))
+                    return false;
+                return true;
+            }
+
+            void HandleOnHit()
+            {
+                Unit* caster = GetCaster();
+                Unit* target = GetHitUnit();
+
+                if (!target)
+                    return;
+
+                if (!caster->HasAura(SPELL_DRUID_GLYPH_OF_BLOOMING))
+                {
+                    if (Aura* lifeBloom = target->GetAura(SPELL_DRUID_LIFEBLOOM, caster->GetGUID()))
+                    {
+                        lifeBloom->RefreshDuration();
+                    }
+                }
+            }
+            
+            void Register() override
+            {
+                OnHit += SpellHitFn(spell_dru_lifebloom_refresh_SpellScript::HandleOnHit);
+            }
+        };
+
+        SpellScript* GetSpellScript() const
+        {
+            return new spell_dru_lifebloom_refresh_SpellScript();
+        }
+};
 // 1850 - Dash
 class spell_dru_dash : public SpellScriptLoader
 {
@@ -934,6 +982,7 @@ public:
 
 void AddSC_druid_spell_scripts()
 {
+    new spell_dru_lifebloom_refresh();
     new spell_dru_dash();
     new spell_dru_eclipse("spell_dru_eclipse_lunar");
     new spell_dru_eclipse("spell_dru_eclipse_solar");
