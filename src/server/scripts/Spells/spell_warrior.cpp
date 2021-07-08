@@ -35,6 +35,8 @@ enum WarriorSpells
     SPELL_WARRIOR_CHARGE                            = 34846,
     SPELL_WARRIOR_CHARGE_STUN                       = 7922,
     SPELL_WARRIOR_COLOSSUS_SMASH                    = 86346,
+    SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA              = 56636,
+    SPELL_WARRIOR_TASTE_FOR_BLOOD                   = 60503,
 
     SPELL_WARRIOR_LAST_STAND_TRIGGERED              = 12976, // obsolete
     SPELL_WARRIOR_RALLYING_CRY                      = 97463,
@@ -773,6 +775,161 @@ public:
     }
 };
 
+class spell_warr_taste_for_blood : public SpellScriptLoader
+{
+public:
+    spell_warr_taste_for_blood() : SpellScriptLoader("spell_warr_taste_for_blood") { }
+
+    class spell_warr_taste_for_blood_AuraScript: public AuraScript
+    {
+        PrepareAuraScript(spell_warr_taste_for_blood_AuraScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        int32 stacks;
+
+        bool checkProc(ProcEventInfo& eventInfo)
+        {
+            auto const caster = eventInfo.GetActor();
+            auto const target = eventInfo.GetActionTarget();
+
+            if (!caster || !target || caster == target)
+                return false;
+
+            if (eventInfo.GetHitMask() & PROC_EX_DODGE)
+            {
+                stacks = GetSpellInfo()->Effects[EFFECT_0].BasePoints;
+                return true;
+            }
+
+            auto const spellInfo = eventInfo.GetSpellInfo();
+            if (spellInfo && spellInfo->Id == SPELL_WARRIOR_MORTAL_STRIKE_AURA)
+            {
+                stacks = GetSpellInfo()->Effects[EFFECT_1].BasePoints;
+                return true;
+            }
+
+            return false;
+        }
+
+        void onProc(AuraEffect const*, ProcEventInfo& eventInfo)
+        {
+            PreventDefaultAction();
+
+            CustomSpellValues values;
+            values.AddSpellMod(SPELLVALUE_AURA_STACK, stacks);
+
+            auto const caster = eventInfo.GetActor();
+            caster->CastCustomSpell(SPELL_WARRIOR_TASTE_FOR_BLOOD, values, caster, TRIGGERED_FULL_MASK);
+        }
+
+        void Register()
+        {
+            DoCheckProc += AuraCheckProcFn(spell_warr_taste_for_blood_AuraScript::checkProc);
+            OnEffectProc += AuraEffectProcFn(spell_warr_taste_for_blood_AuraScript::onProc, EFFECT_0, SPELL_AURA_DUMMY);
+        }
+    };
+
+    AuraScript* GetAuraScript() const
+    {
+        return new spell_warr_taste_for_blood_AuraScript;
+    }
+};
+
+// Mortal strike - 12294
+class spell_warr_mortal_strike : public SpellScriptLoader
+{
+public:
+    spell_warr_mortal_strike() : SpellScriptLoader("spell_warr_mortal_strike") { }
+
+    class spell_warr_mortal_strike_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_mortal_strike_SpellScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        void HandleOnHit()
+        {
+            if (Player* player = GetCaster()->ToPlayer())
+            {
+                // fix taste for blood charge on hit with mortal strike
+                if (player->HasAura(SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA))
+                {
+                    player->StartReactiveTimer(REACTIVE_OVERPOWER);
+                    player->CastSpell(player, SPELL_WARRIOR_TASTE_FOR_BLOOD, true);
+                }
+            }
+        }
+
+        void Register()
+        {
+            OnHit += SpellHitFn(spell_warr_mortal_strike_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_mortal_strike_SpellScript();
+    }
+};
+
+// Called by Overpower - 7384
+// Taste for Blood - 56638
+class spell_warr_overpower : public SpellScriptLoader
+{
+public:
+    spell_warr_overpower() : SpellScriptLoader("spell_warr_overpower") { }
+
+    class spell_warr_overpower_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_overpower_SpellScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        void HandleOnHit()
+        {
+            if (Player* player = GetCaster()->ToPlayer())
+            {
+                if (player->HasAura(SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA))
+                {
+                    if (Aura* overPower = player->GetAura(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                    {
+                        if (overPower->GetStackAmount() > 1)
+                            overPower->SetStackAmount(overPower->GetStackAmount() - 1);
+                        else
+                            player->RemoveAura(SPELL_WARRIOR_TASTE_FOR_BLOOD);
+                    }
+                }
+            }
+        }
+
+        void Register()
+        {
+            OnHit += SpellHitFn(spell_warr_overpower_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_overpower_SpellScript();
+    }
+};
+
 void AddSC_warrior_spell_scripts()
 {
     new spell_warr_bloodthirst();
@@ -793,4 +950,7 @@ void AddSC_warrior_spell_scripts()
     new spell_warr_sweeping_strikes();
     new spell_warr_sword_and_board();
     new spell_warr_victorious();
+    new spell_warr_taste_for_blood();
+    new spell_warr_mortal_strike();
+    new spell_warr_overpower();
 }
