@@ -1682,9 +1682,9 @@ void WorldSession::SendModifyCooldown(ObjectGuid UnitGUID, int32 DeltaTime, int3
     WorldPacket data(SMSG_MODIFY_COOLDOWN, 4 + 8 + 4);
     data.WriteGuidMask(UnitGUID, 2, 1, 0, 4, 7, 3, 6, 5);
     data.WriteGuidBytes(UnitGUID, 4, 1);
-    data << uint32(SpellID);         // Spell ID
-    data.WriteGuidBytes(UnitGUID, 3, 6, 7, 5, 0);
     data << int32(DeltaTime);        // Cooldown mod in milliseconds
+    data.WriteGuidBytes(UnitGUID, 3, 6, 7, 5, 0);
+    data << uint32(SpellID);        // Spell ID
     data.WriteGuidBytes(UnitGUID, 2);
     SendPacket(&data);
 }

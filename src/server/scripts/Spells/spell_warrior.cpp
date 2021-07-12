@@ -30,6 +30,7 @@
 
 enum WarriorSpells
 {
+    SPELL_WARRIOR_SHOCKWAVE_STUN                    = 132168,
     SPELL_WARRIOR_BLOODTHIRST_DAMAGE                = 23881,
     SPELL_WARRIOR_BLOODTHIRST_HEAL                  = 117313,
     SPELL_WARRIOR_CHARGE                            = 34846,
@@ -71,6 +72,50 @@ enum MiscSpells
     SPELL_PALADIN_BLESSING_OF_SANCTUARY             = 20911,
     SPELL_PALADIN_GREATER_BLESSING_OF_SANCTUARY     = 25899,
     SPELL_PRIEST_RENEWED_HOPE                       = 63944
+};
+
+// Shockwave - 46968
+class spell_warr_shockwave : public SpellScriptLoader
+{
+public:
+    spell_warr_shockwave() : SpellScriptLoader("spell_warr_shockwave") { }
+
+    class spell_warr_shockwave_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_shockwave_SpellScript);
+
+        void CountTargets(std::list<WorldObject*>& targets)
+        {
+            targetCount = targets.size();
+        }
+
+        void HandleStun(SpellEffIndex /*effIndex*/)
+        {
+            GetCaster()->CastSpell(GetHitUnit(), SPELL_WARRIOR_SHOCKWAVE_STUN, true);
+        }
+
+        // Cooldown reduced by 20 sec. if it hits 3 targets
+        void HandleAfterCast()
+        {
+            if (targetCount >= GetSpellInfo()->Effects[EFFECT_0].BasePoints)
+                GetCaster()->ToPlayer()->ModifySpellCooldown(GetSpellInfo()->Id, -GetSpellInfo()->Effects[EFFECT_3].BasePoints * IN_MILLISECONDS);
+        }
+
+        void Register()
+        {
+            OnEffectHitTarget += SpellEffectFn(spell_warr_shockwave_SpellScript::HandleStun, EFFECT_0, SPELL_EFFECT_DUMMY);
+            AfterCast += SpellCastFn(spell_warr_shockwave_SpellScript::HandleAfterCast);
+            OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_warr_shockwave_SpellScript::CountTargets, EFFECT_0, TARGET_UNIT_CONE_ENEMY_104);
+        }
+
+    private:
+        int32 targetCount = 0;
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_shockwave_SpellScript();
+    }
 };
 
 // Bloodthirst - 23881
@@ -789,6 +834,7 @@ void AddSC_warrior_spell_scripts()
     new spell_warr_second_wind_proc();
     new spell_warr_second_wind_trigger();
     new spell_warr_shattering_throw();
+    new spell_warr_shockwave();
     new spell_warr_sudden_death();
     new spell_warr_sweeping_strikes();
     new spell_warr_sword_and_board();
