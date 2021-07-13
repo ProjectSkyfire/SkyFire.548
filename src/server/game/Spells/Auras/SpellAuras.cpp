@@ -1237,6 +1237,20 @@ void Aura::HandleAuraSpecificMods(AuraApplication const* aurApp, Unit* caster, b
                         caster->CastCustomSpell(target, 64801, &heal, NULL, NULL, true, NULL, GetEffect(EFFECT_0));
                     }
                 }
+
+                switch (m_spellInfo->Id)
+                {
+                    case 1850:   // Dash
+                    case 137452: // Displacer Beast
+                    case 5215:   // Prowl
+                    {
+                        // check for catform
+                        if (!caster->HasAura(768))
+                            caster->CastSpell(caster, 768, true);
+                        break;
+                    }
+                    break;
+                }
                 break;
             case SPELLFAMILY_MAGE:
                 if (!caster)
