@@ -56,7 +56,119 @@ enum DruidSpells
     SPELL_DRUID_STAMPEDE_BAER_RANK_1        = 81016,
     SPELL_DRUID_STAMPEDE_CAT_RANK_1         = 81021,
     SPELL_DRUID_STAMPEDE_CAT_STATE          = 109881,
-    SPELL_DRUID_TIGER_S_FURY_ENERGIZE       = 51178
+    SPELL_DRUID_TIGER_S_FURY_ENERGIZE       = 51178,
+    SPELL_DRUID_PROWL                       = 5215,
+    SPELL_DRUID_CAT_FORM                    = 768,
+    SPELL_DRUID_DASH                        = 1850,
+    SPELL_DRUID_LIFEBLOOM                   = 33763,
+    SPELL_DRUID_GLYPH_OF_BLOOMING           = 121840,
+    SPELL_DRUID_PREDATORY_SWIFTNESS_TRIGGER = 69369,
+};
+
+// Called by Regrowth - 8936, Nourish - 50464, Healing Touch - 5185
+// Lifebloom - 33763 refresh duration
+class spell_dru_lifebloom_refresh : public SpellScriptLoader
+{
+    public:
+        spell_dru_lifebloom_refresh() : SpellScriptLoader("spell_dru_lifebloom_refresh") { }
+
+        class spell_dru_lifebloom_refresh_SpellScript : public SpellScript
+        {
+            PrepareSpellScript(spell_dru_lifebloom_refresh_SpellScript)
+
+            bool Validate(SpellInfo const* /*spellInfo*/) override
+            {
+                if (!sSpellMgr->GetSpellInfo(SPELL_DRUID_LIFEBLOOM))
+                    return false;
+                return true;
+            }
+
+            void HandleOnHit()
+            {
+                Unit* caster = GetCaster();
+                Unit* target = GetHitUnit();
+
+                if (!target)
+                    return;
+
+                if (!caster->HasAura(SPELL_DRUID_GLYPH_OF_BLOOMING))
+                {
+                    if (Aura* lifeBloom = target->GetAura(SPELL_DRUID_LIFEBLOOM, caster->GetGUID()))
+                    {
+                        lifeBloom->RefreshDuration();
+                    }
+                }
+            }
+            
+            void Register() override
+            {
+                OnHit += SpellHitFn(spell_dru_lifebloom_refresh_SpellScript::HandleOnHit);
+            }
+        };
+
+        SpellScript* GetSpellScript() const
+        {
+            return new spell_dru_lifebloom_refresh_SpellScript();
+        }
+};
+
+// Cat Form - 768
+class spell_dru_cat_form : public SpellScriptLoader
+{
+public:
+    spell_dru_cat_form() : SpellScriptLoader("spell_dru_cat_form") { }
+
+    class spell_dru_cat_form_AuraScript : public AuraScript
+    {
+        PrepareAuraScript(spell_dru_cat_form_AuraScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/) override
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_DRUID_PROWL))
+                return false;
+            return true;
+        }
+
+        void OnApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+        {
+            Unit* caster = GetTarget();
+
+            SpellInfo const* dash = sSpellMgr->GetSpellInfo(SPELL_DRUID_DASH);
+            if (!dash)
+                return;
+
+            // if we have dash, restore increased movement speed
+            if (AuraEffect* dashAura = caster->GetAuraEffect(SPELL_DRUID_DASH, EFFECT_0))
+                dashAura->SetAmount(dash->Effects[EFFECT_0].BasePoints);
+        }
+
+
+        void OnRemove(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
+        {
+            // remove prowl on leaving catform
+            if (Unit* caster = GetTarget())
+            {
+                caster->RemoveOwnedAura(SPELL_DRUID_PROWL);
+
+                // remove dash leaving catform. temp. fix
+                if (AuraEffect* dashAura = caster->GetAuraEffect(SPELL_DRUID_DASH, EFFECT_0))
+                    dashAura->SetAmount(0);
+            }
+
+            
+        }
+
+        void Register()
+        {
+            OnEffectApply += AuraEffectApplyFn(spell_dru_cat_form_AuraScript::OnApply, EFFECT_0, SPELL_AURA_MOD_SHAPESHIFT, AURA_EFFECT_HANDLE_REAL);
+            OnEffectRemove += AuraEffectRemoveFn(spell_dru_cat_form_AuraScript::OnRemove, EFFECT_0, SPELL_AURA_MOD_SHAPESHIFT, AURA_EFFECT_HANDLE_REAL);
+        }
+    };
+
+    AuraScript* GetAuraScript() const
+    {
+        return new spell_dru_cat_form_AuraScript();
+    }
 };
 
 // 1850 - Dash
@@ -85,6 +197,28 @@ public:
     AuraScript* GetAuraScript() const override
     {
         return new spell_dru_dash_AuraScript();
+    }
+
+    class spell_dru_dash_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_dru_dash_SpellScript);
+
+        void HandleOnHit()
+        {
+            if (Player* player = GetCaster()->ToPlayer())
+                player->RemoveMovementImpairingAuras();
+        }
+
+
+        void Register() override
+        {
+            OnHit += SpellHitFn(spell_dru_dash_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const override
+    {
+        return new spell_dru_dash_SpellScript();
     }
 };
 
@@ -412,8 +546,6 @@ public:
         {
             if (!sSpellMgr->GetSpellInfo(SPELL_DRUID_LIFEBLOOM_FINAL_HEAL))
                 return false;
-            if (!sSpellMgr->GetSpellInfo(SPELL_DRUID_LIFEBLOOM_ENERGIZE))
-                return false;
             return true;
         }
 
@@ -423,18 +555,37 @@ public:
             if (GetTargetApplication()->GetRemoveMode() != AURA_REMOVE_BY_EXPIRE)
                 return;
 
+            if (!GetCaster())
+                return;
+
+            if (GetCaster()->ToPlayer()->HasSpellCooldown(SPELL_DRUID_LIFEBLOOM_FINAL_HEAL))
+                return;
+
+
             // final heal
             int32 stack = GetStackAmount();
             int32 healAmount = aurEff->GetAmount();
-            if (Unit* caster = GetCaster())
+            if (Player* caster = GetCaster()->ToPlayer())
             {
                 healAmount = caster->SpellHealingBonusDone(GetTarget(), GetSpellInfo(), healAmount, HEAL, stack);
                 healAmount = GetTarget()->SpellHealingBonusTaken(caster, GetSpellInfo(), healAmount, HEAL, stack);
 
+                if (caster->HasAura(SPELL_DRUID_GLYPH_OF_BLOOMING))
+                    AddPct(healAmount, 50);
+
                 GetTarget()->CastCustomSpell(GetTarget(), SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, &healAmount, NULL, NULL, true, NULL, aurEff, GetCasterGUID());
+
+                caster->AddSpellCooldown(SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, 0, 1 * IN_MILLISECONDS);
+
+                return;
             }
 
+            // Increase final heal by 50%
+            if (GetCaster()->HasAura(SPELL_DRUID_GLYPH_OF_BLOOMING))
+                AddPct(healAmount, 50);
+
             GetTarget()->CastCustomSpell(GetTarget(), SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, &healAmount, NULL, NULL, true, NULL, aurEff, GetCasterGUID());
+            GetCaster()->ToPlayer()->AddSpellCooldown(SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, 0, 1 * IN_MILLISECONDS);
         }
 
         void HandleDispel(DispelInfo* dispelInfo)
@@ -450,6 +601,8 @@ public:
                         healAmount = caster->SpellHealingBonusDone(target, GetSpellInfo(), healAmount, HEAL, dispelInfo->GetRemovedCharges());
                         healAmount = target->SpellHealingBonusTaken(caster, GetSpellInfo(), healAmount, HEAL, dispelInfo->GetRemovedCharges());
                         target->CastCustomSpell(target, SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, &healAmount, NULL, NULL, true, NULL, NULL, GetCasterGUID());
+
+                        return;
                     }
 
                     target->CastCustomSpell(target, SPELL_DRUID_LIFEBLOOM_FINAL_HEAL, &healAmount, NULL, NULL, true, NULL, NULL, GetCasterGUID());
@@ -567,6 +720,40 @@ public:
     AuraScript* GetAuraScript() const override
     {
         return new spell_dru_predatory_strikes_AuraScript();
+    }
+};
+
+// Called by Healing touch - 5185, Entangling roots - 339, Hibernate - 2637, Rebirth - 20484
+// Predatory swiftness - 16974
+class spell_dru_predatory_swiftness : public SpellScriptLoader
+{
+public:
+    spell_dru_predatory_swiftness() : SpellScriptLoader("spell_dru_predatory_swiftness") { }
+
+    class spell_dru_predatory_swiftness_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_dru_predatory_swiftness_SpellScript);
+
+        void HandleOnHit()
+        {   
+            if (Unit* caster = GetCaster())
+            {
+                if (caster->HasAura(SPELL_DRUID_PREDATORY_SWIFTNESS_TRIGGER))
+                {
+                    caster->RemoveAurasDueToSpell(SPELL_DRUID_PREDATORY_SWIFTNESS_TRIGGER);
+                }
+            }
+        }
+
+        void Register()
+        {
+            OnHit += SpellHitFn(spell_dru_predatory_swiftness_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const override
+    {
+        return new spell_dru_predatory_swiftness_SpellScript();
     }
 };
 
@@ -934,6 +1121,9 @@ public:
 
 void AddSC_druid_spell_scripts()
 {
+    new spell_dru_predatory_swiftness();
+    new spell_dru_lifebloom_refresh();
+    new spell_dru_cat_form();
     new spell_dru_dash();
     new spell_dru_eclipse("spell_dru_eclipse_lunar");
     new spell_dru_eclipse("spell_dru_eclipse_solar");

@@ -30,11 +30,15 @@
 
 enum WarriorSpells
 {
+    SPELL_WARRIOR_SHOCKWAVE_STUN                    = 132168,
     SPELL_WARRIOR_BLOODTHIRST_DAMAGE                = 23881,
     SPELL_WARRIOR_BLOODTHIRST_HEAL                  = 117313,
     SPELL_WARRIOR_CHARGE                            = 34846,
     SPELL_WARRIOR_CHARGE_STUN                       = 7922,
     SPELL_WARRIOR_COLOSSUS_SMASH                    = 86346,
+    SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA              = 56636,
+    SPELL_WARRIOR_TASTE_FOR_BLOOD                   = 60503,
+    SPELL_WARRIOR_VICTORIOUS                        = 32216,
 
     SPELL_WARRIOR_LAST_STAND_TRIGGERED              = 12976, // obsolete
     SPELL_WARRIOR_RALLYING_CRY                      = 97463,
@@ -71,6 +75,50 @@ enum MiscSpells
     SPELL_PALADIN_BLESSING_OF_SANCTUARY             = 20911,
     SPELL_PALADIN_GREATER_BLESSING_OF_SANCTUARY     = 25899,
     SPELL_PRIEST_RENEWED_HOPE                       = 63944
+};
+
+// Shockwave - 46968
+class spell_warr_shockwave : public SpellScriptLoader
+{
+public:
+    spell_warr_shockwave() : SpellScriptLoader("spell_warr_shockwave") { }
+
+    class spell_warr_shockwave_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_shockwave_SpellScript);
+
+        void CountTargets(std::list<WorldObject*>& targets)
+        {
+            targetCount = targets.size();
+        }
+
+        void HandleStun(SpellEffIndex /*effIndex*/)
+        {
+            GetCaster()->CastSpell(GetHitUnit(), SPELL_WARRIOR_SHOCKWAVE_STUN, true);
+        }
+
+        // Cooldown reduced by 20 sec. if it hits 3 targets
+        void HandleAfterCast()
+        {
+            if (targetCount >= GetSpellInfo()->Effects[EFFECT_0].BasePoints)
+                GetCaster()->ToPlayer()->ModifySpellCooldown(GetSpellInfo()->Id, -GetSpellInfo()->Effects[EFFECT_3].BasePoints * IN_MILLISECONDS);
+        }
+
+        void Register()
+        {
+            OnEffectHitTarget += SpellEffectFn(spell_warr_shockwave_SpellScript::HandleStun, EFFECT_0, SPELL_EFFECT_DUMMY);
+            AfterCast += SpellCastFn(spell_warr_shockwave_SpellScript::HandleAfterCast);
+            OnObjectAreaTargetSelect += SpellObjectAreaTargetSelectFn(spell_warr_shockwave_SpellScript::CountTargets, EFFECT_0, TARGET_UNIT_CONE_ENEMY_104);
+        }
+
+    private:
+        int32 targetCount = 0;
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_shockwave_SpellScript();
+    }
 };
 
 // Bloodthirst - 23881
@@ -745,7 +793,6 @@ public:
 };
 
 // 32216 - Victorious
-// 82368 - Victorious
 class spell_warr_victorious : public SpellScriptLoader
 {
 public:
@@ -773,6 +820,199 @@ public:
     }
 };
 
+// 60503 - Taste for Blood
+class spell_warr_taste_for_blood : public SpellScriptLoader
+{
+public:
+    spell_warr_taste_for_blood() : SpellScriptLoader("spell_warr_taste_for_blood") { }
+
+    class spell_warr_taste_for_blood_AuraScript: public AuraScript
+    {
+        PrepareAuraScript(spell_warr_taste_for_blood_AuraScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        int32 stacks;
+
+        bool CheckProc(ProcEventInfo& eventInfo)
+        {
+            auto const caster = eventInfo.GetActor();
+            auto const target = eventInfo.GetActionTarget();
+
+            if (!caster || !target || caster == target)
+                return false;
+
+            if (eventInfo.GetHitMask() & PROC_EX_DODGE)
+            {
+                stacks = GetSpellInfo()->Effects[EFFECT_0].BasePoints;
+                return true;
+            }
+
+            auto const spellInfo = eventInfo.GetSpellInfo();
+            if (spellInfo && spellInfo->Id == SPELL_WARRIOR_MORTAL_STRIKE_AURA)
+            {
+                stacks = GetSpellInfo()->Effects[EFFECT_1].BasePoints;
+                return true;
+            }
+
+            return false;
+        }
+
+        void HandleEffectProc(AuraEffect const*, ProcEventInfo& eventInfo)
+        {
+            PreventDefaultAction();
+
+            CustomSpellValues values;
+            values.AddSpellMod(SPELLVALUE_AURA_STACK, stacks);
+
+            auto const caster = eventInfo.GetActor();
+            caster->CastCustomSpell(SPELL_WARRIOR_TASTE_FOR_BLOOD, values, caster, TRIGGERED_FULL_MASK);
+        }
+
+        void Register()
+        {
+            DoCheckProc += AuraCheckProcFn(spell_warr_taste_for_blood_AuraScript::CheckProc);
+            OnEffectProc += AuraEffectProcFn(spell_warr_taste_for_blood_AuraScript::HandleEffectProc, EFFECT_0, SPELL_AURA_DUMMY);
+        }
+    };
+
+    AuraScript* GetAuraScript() const
+    {
+        return new spell_warr_taste_for_blood_AuraScript;
+    }
+};
+
+// 12294 - Mortal strike
+class spell_warr_mortal_strike : public SpellScriptLoader
+{
+public:
+    spell_warr_mortal_strike() : SpellScriptLoader("spell_warr_mortal_strike") { }
+
+    class spell_warr_mortal_strike_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_mortal_strike_SpellScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        void HandleOnHit()
+        {
+            if (Player* player = GetCaster()->ToPlayer())
+            {
+                // fix taste for blood charge on hit with mortal strike
+                if (player->HasAura(SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA))
+                {
+                    player->StartReactiveTimer(REACTIVE_OVERPOWER);
+                    player->CastSpell(player, SPELL_WARRIOR_TASTE_FOR_BLOOD, true);
+                }
+            }
+        }
+
+        void Register()
+        {
+            OnHit += SpellHitFn(spell_warr_mortal_strike_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_mortal_strike_SpellScript();
+    }
+};
+
+// Called by Overpower - 7384
+// Taste for Blood - 56638
+class spell_warr_overpower : public SpellScriptLoader
+{
+public:
+    spell_warr_overpower() : SpellScriptLoader("spell_warr_overpower") { }
+
+    class spell_warr_overpower_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_overpower_SpellScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                return false;
+            return true;
+        }
+
+        void HandleOnHit()
+        {
+            if (Player* player = GetCaster()->ToPlayer())
+            {
+                if (player->HasAura(SPELL_WARRIOR_TASTE_FOR_BLOOD_AURA))
+                {
+                    if (Aura* overPower = player->GetAura(SPELL_WARRIOR_TASTE_FOR_BLOOD))
+                    {
+                        if (overPower->GetStackAmount() > 1)
+                            overPower->SetStackAmount(overPower->GetStackAmount() - 1);
+                        else
+                            player->RemoveAura(SPELL_WARRIOR_TASTE_FOR_BLOOD);
+                    }
+                }
+            }
+        }
+
+        void Register()
+        {
+            OnHit += SpellHitFn(spell_warr_overpower_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+        return new spell_warr_overpower_SpellScript();
+    }
+};
+
+// 34428 - Victory Rush
+class spell_warr_victory_rush : public SpellScriptLoader
+{
+public:
+    spell_warr_victory_rush() : SpellScriptLoader("spell_warr_victory_rush") { }
+
+    class spell_warr_victory_rush_SpellScript : public SpellScript
+    {
+        PrepareSpellScript(spell_warr_victory_rush_SpellScript);
+
+        bool Validate(SpellInfo const* /*spellInfo*/)
+        {
+            if (!sSpellMgr->GetSpellInfo(SPELL_WARRIOR_VICTORIOUS))
+                return false;
+            return true;
+        }
+
+        void HandleOnHit()
+        {
+            if (Unit* caster = GetCaster()->ToPlayer())
+            {
+                caster->RemoveAura(SPELL_WARRIOR_VICTORIOUS);
+            }
+        }
+
+        void Register() OVERRIDE
+        {
+            OnHit += SpellHitFn(spell_warr_victory_rush_SpellScript::HandleOnHit);
+        }
+    };
+
+    SpellScript* GetSpellScript() const
+    {
+       return new spell_warr_victory_rush_SpellScript();
+    }
+};
+
 void AddSC_warrior_spell_scripts()
 {
     new spell_warr_bloodthirst();
@@ -789,8 +1029,13 @@ void AddSC_warrior_spell_scripts()
     new spell_warr_second_wind_proc();
     new spell_warr_second_wind_trigger();
     new spell_warr_shattering_throw();
+    new spell_warr_shockwave();
     new spell_warr_sudden_death();
     new spell_warr_sweeping_strikes();
     new spell_warr_sword_and_board();
     new spell_warr_victorious();
+    new spell_warr_taste_for_blood();
+    new spell_warr_mortal_strike();
+    new spell_warr_overpower();
+    new spell_warr_victory_rush();
 }

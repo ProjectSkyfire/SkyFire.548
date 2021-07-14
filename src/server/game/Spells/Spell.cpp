@@ -6846,25 +6846,35 @@ SpellCastResult Spell::CheckItems()
             case SPELL_EFFECT_CREATE_ITEM:
             case SPELL_EFFECT_CREATE_ITEM_2:
             {
-                if (!IsTriggered() && m_spellInfo->Effects[i].ItemType)
+                Unit* target = m_targets.GetUnitTarget() ? m_targets.GetUnitTarget() : m_caster;
+                if (target && target->GetTypeId() == TypeID::TYPEID_PLAYER && !IsTriggered() && m_spellInfo->Effects[i].ItemType)
                 {
+                    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(m_spellInfo->Effects[i].ItemType);
+                    if (!itemTemplate)
+                        return SPELL_FAILED_ITEM_NOT_FOUND;
+
+                    uint32 createCount = std::clamp<uint32>(m_spellInfo->Effects[i].CalcValue(), 1u, itemTemplate->GetMaxStackSize());
+
                     ItemPosCountVec dest;
-                    InventoryResult msg = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, m_spellInfo->Effects[i].ItemType, 1);
+                    InventoryResult msg = target->ToPlayer()->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, m_spellInfo->Effects[i].ItemType, createCount);
                     if (msg != EQUIP_ERR_OK)
-                    {
-                        ItemTemplate const* pProto = sObjectMgr->GetItemTemplate(m_spellInfo->Effects[i].ItemType);
+                    {   
                         /// @todo Needs review
-                        if (pProto && !(pProto->ItemLimitCategory))
+                        if (itemTemplate->ItemLimitCategory)
                         {
                             player->SendEquipError(msg, NULL, NULL, m_spellInfo->Effects[i].ItemType);
                             return SPELL_FAILED_DONT_REPORT;
                         }
                         else
                         {
+                            // Conjure Food/Water/Refreshment spells
                             if (!(m_spellInfo->SpellFamilyName == SPELLFAMILY_MAGE && (m_spellInfo->SpellFamilyFlags[0] & 0x40000000)))
                                 return SPELL_FAILED_TOO_MANY_OF_ITEM;
-                            else if (!(player->HasItemCount(m_spellInfo->Effects[i].ItemType)))
+                            else if (!(target->ToPlayer()->HasItemCount(m_spellInfo->Effects[i].ItemType)))
+                            {
+                                player->SendEquipError(msg, nullptr, nullptr, m_spellInfo->Effects[i].ItemType);
                                 return SPELL_FAILED_TOO_MANY_OF_ITEM;
+                            }
                             else
                                 player->CastSpell(m_caster, m_spellInfo->Effects[EFFECT_1].CalcValue(), false);        // move this to anywhere
                             return SPELL_FAILED_DONT_REPORT;

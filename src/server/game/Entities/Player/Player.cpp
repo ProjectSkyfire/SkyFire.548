@@ -23145,19 +23145,19 @@ void Player::AddSpellCooldown(uint32 spellid, uint32 itemid, time_t end_time)
     m_spellCooldowns[spellid] = sc;
 }
 
-void Player::ModifySpellCooldown(uint32 spellId, int32 cooldown)
+void Player::ModifySpellCooldown(uint32 spellId, int32 offset)
 {
     SpellCooldowns::iterator itr = m_spellCooldowns.find(spellId);
     if (itr == m_spellCooldowns.end())
         return;
 
     time_t now = time(NULL);
-    if (itr->second.end + (cooldown / IN_MILLISECONDS) > now)
-        itr->second.end += (cooldown / IN_MILLISECONDS);
+    if (itr->second.end + (offset / IN_MILLISECONDS) > now)
+        itr->second.end += (offset / IN_MILLISECONDS);
     else
         m_spellCooldowns.erase(itr);
 
-    GetSession()->SendModifyCooldown(GetObjectGUID(), cooldown, spellId);
+    GetSession()->SendModifyCooldown(GetObjectGUID(), offset, spellId);
 
     SF_LOG_DEBUG("misc", "ModifySpellCooldown:: Player: %s (GUID: %u) Spell: %u cooldown: %u", GetName().c_str(), GetGUIDLow(), spellId, GetSpellCooldownDelay(spellId));
 }

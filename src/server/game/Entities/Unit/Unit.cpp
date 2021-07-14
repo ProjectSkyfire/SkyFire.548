@@ -9255,7 +9255,10 @@ uint32 Unit::SpellHealingBonusDone(Unit* victim, SpellInfo const* spellProto, ui
     // Healing done percent
     AuraEffectList const& mHealingDonePct = GetAuraEffectsByType(SPELL_AURA_MOD_HEALING_DONE_PERCENT);
     for (AuraEffectList::const_iterator i = mHealingDonePct.begin(); i != mHealingDonePct.end(); ++i)
-        AddPct(DoneTotalMod, (*i)->GetAmount());
+    {
+        float amount = ((*i)->GetAmount() ? (*i)->GetAmount() : (*i)->GetAmount()) * (1.0f - (victim->GetHealthPct() / 100.0f));
+        AddPct(DoneTotalMod, amount);
+    }
 
     // done scripted mod (take it from owner)
     Unit const* owner = GetOwner() ? GetOwner() : this;

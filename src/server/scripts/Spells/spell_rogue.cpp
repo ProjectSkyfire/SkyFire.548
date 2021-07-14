@@ -39,7 +39,8 @@ enum RogueSpells
     SPELL_ROGUE_MASTER_OF_SUBTLETY_PERIODIC         = 31666,
     SPELL_ROGUE_SLICE_AND_DICE                      = 5171,
     SPELL_ROGUE_TRICKS_OF_THE_TRADE_DMG_BOOST       = 57933,
-    SPELL_ROGUE_TRICKS_OF_THE_TRADE_PROC            = 59628
+    SPELL_ROGUE_TRICKS_OF_THE_TRADE_PROC            = 59628,
+    SPELL_ROGUE_CUT_TO_THE_CHASE_AURA               = 51667,
 };
 
 enum RogueSpellIcons
@@ -203,32 +204,45 @@ public:
     }
 };
 
-// -51664 - Cut to the Chase
+// Called by Envenom - 32645
+// Cut to the Chase - 51667
 class spell_rog_cut_to_the_chase : public SpellScriptLoader
 {
 public:
     spell_rog_cut_to_the_chase() : SpellScriptLoader("spell_rog_cut_to_the_chase") { }
 
-    class spell_rog_cut_to_the_chase_AuraScript : public AuraScript
+    class spell_rog_cut_to_the_chase_SpellScript : public SpellScript
     {
-        PrepareAuraScript(spell_rog_cut_to_the_chase_AuraScript);
+        PrepareSpellScript(spell_rog_cut_to_the_chase_SpellScript);
 
-        void HandleProc(AuraEffect const* /*aurEff*/, ProcEventInfo& /*eventInfo*/)
+        void HandleOnHit()
         {
-            PreventDefaultAction();
-            if (Aura* aur = GetTarget()->GetAura(SPELL_ROGUE_SLICE_AND_DICE))
-                aur->SetDuration(aur->GetSpellInfo()->GetMaxDuration(), true);
+            if (Player* _player = GetCaster()->ToPlayer())
+            {
+                if (Unit* target = GetHitUnit())
+                {
+                    if (_player->HasAura(SPELL_ROGUE_CUT_TO_THE_CHASE_AURA))
+                    {
+                        if (Aura* sliceAndDice = _player->GetAura(SPELL_ROGUE_SLICE_AND_DICE, _player->GetGUID()))
+                        {
+                            int32 fiveComboDuration = 36 * IN_MILLISECONDS;
+                            sliceAndDice->SetDuration(fiveComboDuration);
+                            sliceAndDice->SetMaxDuration(fiveComboDuration);
+                        }
+                    }
+                }
+            }
         }
 
         void Register() OVERRIDE
         {
-            OnEffectProc += AuraEffectProcFn(spell_rog_cut_to_the_chase_AuraScript::HandleProc, EFFECT_0, SPELL_AURA_DUMMY);
+            OnHit += SpellHitFn(spell_rog_cut_to_the_chase_SpellScript::HandleOnHit);
         }
     };
 
-    AuraScript* GetAuraScript() const OVERRIDE
+    SpellScript* GetSpellScript() const OVERRIDE
     {
-        return new spell_rog_cut_to_the_chase_AuraScript();
+        return new spell_rog_cut_to_the_chase_SpellScript();
     }
 };
 
